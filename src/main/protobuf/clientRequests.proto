@@ -1,0 +1,58 @@
+package net.digitalbebop;
+
+option java_package = "net.digitalbebop";
+option java_outer_classname = "ClientRequests";
+
+// Modules send this message to the server when they want to index a new
+// element. They are responsible for generating an unique ID `moduleId`
+// that will always represent the same data.
+message IndexRequest {
+
+    // Special keywords used in searching.
+    repeated string tags = 1;
+    
+    // The CSH username of the person who generated this index
+    optional string username = 2;
+    
+    // The module's self-reported unique name
+    required string moduleName = 3;
+    
+    // The unique ID given to this index record by the module
+    required string moduleId = 4;
+
+    // This is for metadata about the actual indexed element. This data will
+    // never be indexed but allow the server to better format the element.
+    optional string metaTags = 5;
+
+    // The data that will be indexed into Solr for full-text searching
+    // This data is only used for indexing and when never be shown to the end
+    // user. This should include things like file format, movie lenght, actors, etc.
+    required string indexData = 6;
+    
+    // The data to be stored as what was indexed. This allow end users to 
+    // get the raw data that was index. If this is not given, then the 
+    // indexData will be used as this.
+    //
+    // This is useful if the data being indexed is a PDF. The indexData will 
+    // be the parsed text from the PDF while this will be the PDF itself,
+    // This allows end users to dowload the actual data that was indexed
+    // and not just a string of the text.
+    optional bytes rawData = 7;
+
+    // An optional timestamp to provide when this object was created. If this is not provided,
+    // then the current timestamp will be used. This is useful when doing a backfill and the
+    // element needs to have its original timestamp associated with it.
+    optional int64 timestamp = 8;
+
+    // the URL location of where the data is located. This is given to the user when they click
+    // on a search result. So for example: the news module would provide a link to webnews for this.
+    optional string location = 9;
+}
+
+// Tells the server that the given element has been should be marked as
+// deleted.
+message DeleteRequest {
+    required string moduleName = 1;
+
+    required string moduleId = 2;
+}
