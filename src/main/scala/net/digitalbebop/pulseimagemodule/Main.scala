@@ -1,33 +1,23 @@
 package net.digitalbebop.pulseimagemodule
 
 
-import java.io.{FileInputStream, FilenameFilter, File}
+import java.io.File
 import java.nio.file._
-import java.nio.file.attribute.{BasicFileAttributes, FileOwnerAttributeView}
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl._
 
 import com.google.protobuf.ByteString
-import com.itextpdf.text.pdf.PdfReader
-import com.itextpdf.text.pdf.parser.PdfTextExtractor
-import com.unboundid.ldap.sdk.{SearchScope, SimpleBindRequest, LDAPConnection}
 import net.digitalbebop.ClientRequests.IndexRequest
 import org.apache.commons.cli.{DefaultParser, Options}
-import org.apache.commons.io.filefilter.TrueFileFilter
-import org.apache.commons.io.{FileUtils, IOUtils}
 import org.apache.http.client.methods.HttpPost
 import org.apache.http.entity.ByteArrayEntity
 import org.apache.http.impl.client.HttpClients
 
-import scala.collection.JavaConversions._
-import scala.collection.mutable
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.ExecutionContext
 import scala.util.parsing.json.JSONObject
-
-
 
 object Main {
 
@@ -73,7 +63,7 @@ object Main {
     val albums = "albums"
 
     val path = dir.getAbsolutePath
-    val moduleId = path.substring(path.indexOf(albums) + albums.length)
+    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1)
     val location = url + moduleId
     val meta = Map(
       "format" -> "album",
@@ -93,7 +83,7 @@ object Main {
     (moduleId, indexBuilder.build())
   }
 
-  def processImage(moduleId: String, file: File): IndexRequest = {
+  def processImage(albumId: String, file: File): IndexRequest = {
     val rawData = Files.readAllBytes(file.toPath)
     val strBuilder = new StringBuilder()
     file.getAbsolutePath.split("/").dropWhile(_ != "albums").tail.foreach(dir =>
@@ -103,7 +93,8 @@ object Main {
     val albums = "albums"
 
     val path = file.getAbsolutePath
-    val location = path.substring(path.indexOf(albums) + albums.length)
+    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1)
+    val location = url + moduleId
     val meta = Map(
       "format" -> "image",
       "title" -> cleanString(file.getName)
@@ -113,13 +104,13 @@ object Main {
     val indexBuilder = IndexRequest.newBuilder()
     indexBuilder.setIndexData(indexData)
     indexBuilder.setRawData(ByteString.copyFrom(rawData))
-    indexBuilder.setLocation(s"$url/$location")
+    indexBuilder.setLocation(location)
     indexBuilder.setModuleName(imageModule)
     indexBuilder.setMetaTags(new JSONObject(meta).toString())
     indexBuilder.setTimestamp(timestamp)
-    indexBuilder.setModuleId(file.getAbsolutePath)
+    indexBuilder.setModuleId(moduleId)
     indexBuilder.addTags("image")
-    indexBuilder.addTags(moduleId)
+    indexBuilder.addTags(albumId)
     indexBuilder.build()
   }
 
@@ -172,7 +163,6 @@ object Main {
               val (moduleId, request) = processAlbum(dir)
               postMessage(request)
               dir.listFiles().map(child => processImage(moduleId, child)).foreach(postMessage)
-              Thread.sleep(5 * 1000)
             }
           }
         }

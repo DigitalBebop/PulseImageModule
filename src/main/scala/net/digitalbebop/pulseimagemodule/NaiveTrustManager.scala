@@ -1,8 +1,8 @@
 package net.digitalbebop.pulseimagemodule
 
-/**
- * Created by jd on 8/28/15.
- */
+import java.security.cert.X509Certificate
+import javax.net.ssl.X509TrustManager
+
 class NaiveTrustManager extends X509TrustManager {
   /**
    * Doesn't throw an exception, so this is how it approves a certificate.
