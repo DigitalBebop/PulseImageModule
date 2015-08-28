@@ -75,15 +75,13 @@ object Main {
 
   def replaceSplits(s: String) = s.replaceAll("[_|-]", " ")
 
-  def cleanString: String => String = splitCamelCase _ compose replaceSplits _
+  def cleanString: String => String = splitCamelCase _ compose replaceSplits
 
   def getAlbums(dir: File, queue: BlockingQueue[File]): Unit =
     dir.listFiles.filter(_.isDirectory).flatMap(_.listFiles).filter(_.isDirectory).foreach(queue.add)
 
-
-  def processAlbum(dir: File): IndexRequest = {
+  def processAlbum(dir: File): (String, IndexRequest) = {
     val images = dir.listFiles
-    val indexBuilder = IndexRequest.newBuilder()
 
     val strBuilder = new StringBuilder()
     dir.getAbsolutePath.split("/").dropWhile(_ != "albums").tail.foreach(dir =>
@@ -93,22 +91,56 @@ object Main {
     val albums = "albums"
 
     val path = dir.getAbsolutePath
-    val location = s"$url/${path.substring(path.indexOf(albums) + albums.length)}"
+    val moduleId = path.substring(path.indexOf(albums) + albums.length)
+    val location = url + moduleId
     val meta = Map(
-      "format" -> "image",
+      "format" -> "album",
       "title" -> cleanString(dir.getName),
       "count" -> images.length
     )
     val timestamp = Files.readAttributes(dir.toPath, classOf[BasicFileAttributes]).creationTime().toMillis
 
+    val indexBuilder = IndexRequest.newBuilder()
     indexBuilder.setIndexData(indexData)
     indexBuilder.setLocation(location)
     indexBuilder.setMetaTags(new JSONObject(meta).toString())
-    indexBuilder.setModuleId(dir.getAbsolutePath)
+    indexBuilder.setModuleId(moduleId)
     indexBuilder.setModuleName(imageModule)
     indexBuilder.setTimestamp(timestamp)
+    indexBuilder.addTags("album")
+    (moduleId, indexBuilder.build())
+  }
+
+  def processImage(moduleId: String, file: File): IndexRequest = {
+    val rawData = Files.readAllBytes(file.toPath)
+    val strBuilder = new StringBuilder()
+    file.getAbsolutePath.split("/").dropWhile(_ != "albums").tail.foreach(dir =>
+      strBuilder.append(" " + dir.replaceAll("[_|-]", " ")))
+    val indexData = strBuilder.toString()
+    val url = "https://gallery.csh.rit.edu/v"
+    val albums = "albums"
+
+    val path = file.getAbsolutePath
+    val location = path.substring(path.indexOf(albums) + albums.length)
+    val meta = Map(
+      "format" -> "image",
+      "title" -> cleanString(file.getName)
+    )
+    val timestamp = Files.readAttributes(file.toPath, classOf[BasicFileAttributes]).creationTime().toMillis
+
+    val indexBuilder = IndexRequest.newBuilder()
+    indexBuilder.setIndexData(indexData)
+    indexBuilder.setRawData(ByteString.copyFrom(rawData))
+    indexBuilder.setLocation(s"$url/$location")
+    indexBuilder.setModuleName(imageModule)
+    indexBuilder.setMetaTags(new JSONObject(meta).toString())
+    indexBuilder.setTimestamp(timestamp)
+    indexBuilder.setModuleId(file.getAbsolutePath)
+    indexBuilder.addTags("image")
+    indexBuilder.addTags(moduleId)
     indexBuilder.build()
   }
+
 
   def postMessage(message: IndexRequest): Unit = {
     val post = new HttpPost(s"$apiServer/api/index")
@@ -134,7 +166,7 @@ object Main {
     else
       "/"
 
-    val queue = new ArrayBlockingQueue[File](1000)
+    val queue = new ArrayBlockingQueue[File](100)
     val POISON_PILL = null
 
     val f =  new FutureTask[Unit](new Callable[Unit]() {
@@ -155,7 +187,10 @@ object Main {
               queue.put(POISON_PILL)
               return
             } else {
-              postMessage(processAlbum(dir))
+              val (moduleId, request) = processAlbum(dir)
+              postMessage(request)
+              dir.listFiles().map(child => processImage(moduleId, child)).foreach(postMessage)
+              Thread.sleep(5 * 1000)
             }
           }
         }
