@@ -78,21 +78,20 @@ object Main {
 
   def processAlbum(dir: File): (String, IndexRequest) = {
     val images = dir.listFiles
-
-    val strBuilder = new StringBuilder()
-    dir.getAbsolutePath.split("/").dropWhile(_ != "albums").tail.foreach(dir =>
-      strBuilder.append(" " + cleanString(dir)))
-    val indexData = strBuilder.toString()
-
     val albums = "albums"
-
+    val strBuilder = new StringBuilder()
+    dir.getAbsolutePath.split("/").dropWhile(_ != albums).tail.foreach { dir =>
+      strBuilder.append(" " + cleanString(dir))
+    }
+    val indexData = strBuilder.toString()
     val path = dir.getAbsolutePath
-    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replace(" ", "_");
+    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replace(" ", "_")
     val location = galleryUrl + moduleId
-    val meta = Map(
+    val title = cleanString(dir.getName) + " - " + cleanString(dir.getParentFile.getName)
+    val meta = Map[String, String](
       "format" -> "album",
-      "title" -> cleanString(dir.getName),
-      "count" -> images.length
+      "title" -> title,
+      "count" -> images.length.toString
     )
     val timestamp = Files.readAttributes(dir.toPath, classOf[BasicFileAttributes]).creationTime().toMillis
 
