@@ -12,10 +12,12 @@ import javax.net.ssl._
 import com.google.protobuf.ByteString
 import net.digitalbebop.ClientRequests.IndexRequest
 import org.apache.commons.cli.{DefaultParser, Options}
+import org.apache.commons.io.FileUtils
 import org.apache.http.client.methods.HttpPost
 import org.apache.http.entity.ByteArrayEntity
 import org.apache.http.impl.client.HttpClients
 
+import scala.collection.JavaConversions._
 import scala.concurrent.ExecutionContext
 import scala.util.parsing.json.JSONObject
 
@@ -23,12 +25,13 @@ object Main {
 
   val startTime = System.currentTimeMillis() / 1000
   final val apiServer = "http://localhost:8080"
+  val galleryUrl = "https://gallery.csh.rit.edu/v/"
   final val imageModule = "images"
-
+  final val extensions = Array("png", "jpg", "jpeg", "gif", "bmp", "svg")
   val filesProcessed  = new AtomicLong(0)
 
   implicit val ec = new ExecutionContext {
-    val threadPool = Executors.newCachedThreadPool()
+    val threadPool = Executors.newFixedThreadPool(20)
 
     def execute(runnable: Runnable): Unit = threadPool.submit(runnable)
 
@@ -49,8 +52,29 @@ object Main {
 
   def cleanString: String => String = splitCamelCase _ compose replaceSplits
 
+  def validFile(file: File): Boolean = {
+    val name = file.getName
+    val index = name.lastIndexOf(".")
+    if (index != -1) {
+      extensions.contains(name.substring(index + 1).toLowerCase)
+    } else {
+      false
+    }
+  }
+
+  def listFiles(dir: File): Array[File] = if (dir.isDirectory) {
+    dir.listFiles().flatMap(listFiles)
+  } else {
+    val index = dir.getName.lastIndexOf(".")
+    if (index != -1 && extensions.contains(dir.getName.substring(index + 1).toLowerCase)) {
+      Array(dir)
+    } else {
+      Array.empty
+    }
+  }
+
   def getAlbums(dir: File, queue: BlockingQueue[File]): Unit =
-    dir.listFiles.filter(_.isDirectory).flatMap(_.listFiles).filter(_.isDirectory).foreach(queue.add)
+    listFiles(dir).map(_.getParentFile).toSet.foreach(queue.add)
 
   def processAlbum(dir: File): (String, IndexRequest) = {
     val images = dir.listFiles
@@ -59,12 +83,12 @@ object Main {
     dir.getAbsolutePath.split("/").dropWhile(_ != "albums").tail.foreach(dir =>
       strBuilder.append(" " + cleanString(dir)))
     val indexData = strBuilder.toString()
-    val url = "https://gallery.csh.rit.edu/v"
+
     val albums = "albums"
 
     val path = dir.getAbsolutePath
-    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1)
-    val location = url + moduleId
+    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replace(" ", "_");
+    val location = galleryUrl + moduleId
     val meta = Map(
       "format" -> "album",
       "title" -> cleanString(dir.getName),
@@ -89,12 +113,11 @@ object Main {
     file.getAbsolutePath.split("/").dropWhile(_ != "albums").tail.foreach(dir =>
       strBuilder.append(" " + dir.replaceAll("[_|-]", " ")))
     val indexData = strBuilder.toString()
-    val url = "https://gallery.csh.rit.edu/v"
     val albums = "albums"
 
     val path = file.getAbsolutePath
-    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1)
-    val location = url + moduleId
+    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replace(" ", "_")
+    val location = galleryUrl + moduleId
     val meta = Map(
       "format" -> "image",
       "title" -> cleanString(file.getName)
@@ -114,13 +137,12 @@ object Main {
     indexBuilder.build()
   }
 
-
   def postMessage(message: IndexRequest): Unit = {
     val post = new HttpPost(s"$apiServer/api/index")
     post.setEntity(new ByteArrayEntity(message.toByteArray))
     HttpClients.createDefault().execute(post).close()
     val amount = filesProcessed.incrementAndGet()
-    if (amount % 10 == 0) {
+    if (amount % 100 == 0) {
       val timeDiff = System.currentTimeMillis() / 1000 - startTime
       println(s"processed $amount files, ${(1.0 * amount) / timeDiff} files/sec")
     }
@@ -139,7 +161,7 @@ object Main {
     else
       "/"
 
-    val queue = new ArrayBlockingQueue[File](100)
+    val queue = new ArrayBlockingQueue[File](1000000)
     val POISON_PILL = null
 
     val f =  new FutureTask[Unit](new Callable[Unit]() {
@@ -150,7 +172,7 @@ object Main {
     })
     ec.execute(f)
 
-    val workerCount = Runtime.getRuntime.availableProcessors() * 2
+    val workerCount = 20
     for (i <- 1 to workerCount) {
       ec.execute(new Runnable() {
         def run() : Unit = {
@@ -160,9 +182,10 @@ object Main {
               queue.put(POISON_PILL)
               return
             } else {
+              println("processing dir: " + dir)
               val (moduleId, request) = processAlbum(dir)
               postMessage(request)
-              dir.listFiles().map(child => processImage(moduleId, child)).foreach(postMessage)
+              dir.listFiles().filter(validFile).map(child => processImage(moduleId, child)).foreach(postMessage)
             }
           }
         }
