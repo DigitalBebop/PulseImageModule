@@ -24,7 +24,7 @@ import scala.util.parsing.json.JSONObject
 object Main {
 
   val startTime = System.currentTimeMillis() / 1000
-  final val apiServer = "http://localhost:8080"
+  //final val apiServer = "http://localhost:8080"
   val galleryUrl = "https://gallery.csh.rit.edu/v/"
   final val imageModule = "images"
   final val extensions = Array("png", "jpg", "jpeg", "gif", "bmp", "svg")
@@ -77,7 +77,6 @@ object Main {
     listFiles(dir).map(_.getParentFile).toSet.foreach(queue.add)
 
   def processAlbum(dir: File): (String, IndexRequest) = {
-    val images = dir.listFiles
     val albums = "albums"
     val strBuilder = new StringBuilder()
     dir.getAbsolutePath.split("/").dropWhile(_ != albums).tail.foreach { dir =>
@@ -85,13 +84,13 @@ object Main {
     }
     val indexData = strBuilder.toString()
     val path = dir.getAbsolutePath
-    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replace(" ", "_")
+    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replaceAll("[ |+]", "_")
     val location = galleryUrl + moduleId
     val title = cleanString(dir.getName) + " - " + cleanString(dir.getParentFile.getName)
     val meta = Map[String, String](
       "format" -> "album",
       "title" -> title,
-      "count" -> images.length.toString
+      "count" -> dir.list.length.toString
     )
     val timestamp = Files.readAttributes(dir.toPath, classOf[BasicFileAttributes]).creationTime().toMillis
 
@@ -107,7 +106,6 @@ object Main {
   }
 
   def processImage(albumId: String, file: File): IndexRequest = {
-    val rawData = Files.readAllBytes(file.toPath)
     val strBuilder = new StringBuilder()
     file.getAbsolutePath.split("/").dropWhile(_ != "albums").tail.foreach(dir =>
       strBuilder.append(" " + dir.replaceAll("[_|-]", " ")))
@@ -116,16 +114,16 @@ object Main {
 
     val path = file.getAbsolutePath
     val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replace(" ", "_")
+    val timestamp = Files.readAttributes(file.toPath, classOf[BasicFileAttributes]).creationTime().toMillis
     val location = galleryUrl + moduleId
     val meta = Map(
       "format" -> "image",
       "title" -> cleanString(file.getName)
     )
-    val timestamp = Files.readAttributes(file.toPath, classOf[BasicFileAttributes]).creationTime().toMillis
 
     val indexBuilder = IndexRequest.newBuilder()
     indexBuilder.setIndexData(indexData)
-    indexBuilder.setRawData(ByteString.copyFrom(rawData))
+    indexBuilder.setRawData(ByteString.readFrom(Files.newInputStream(file.toPath)))
     indexBuilder.setLocation(location)
     indexBuilder.setModuleName(imageModule)
     indexBuilder.setMetaTags(new JSONObject(meta).toString())
@@ -136,7 +134,7 @@ object Main {
     indexBuilder.build()
   }
 
-  def postMessage(message: IndexRequest): Unit = {
+  def postMessage(apiServer: String, message: IndexRequest): Unit = {
     val post = new HttpPost(s"$apiServer/api/index")
     post.setEntity(new ByteArrayEntity(message.toByteArray))
     HttpClients.createDefault().execute(post).close()
@@ -151,6 +149,7 @@ object Main {
 
     val options = new Options()
     options.addOption("dir", true, "the directory to recursively look through")
+    options.addOption("server", true, "the URL of the API server")
 
     val parser = new DefaultParser()
     val cmd = parser.parse(options, args)
@@ -160,7 +159,12 @@ object Main {
     else
       "/"
 
-    val queue = new ArrayBlockingQueue[File](1000000)
+    val apiServer = if (cmd.hasOption("server"))
+      cmd.getOptionValue("server")
+    else
+      "http://localhost:8080"
+
+    val queue = new LinkedBlockingQueue[File]()
     val POISON_PILL = null
 
     val f =  new FutureTask[Unit](new Callable[Unit]() {
@@ -171,7 +175,7 @@ object Main {
     })
     ec.execute(f)
 
-    val workerCount = 20
+    val workerCount = 2
     for (i <- 1 to workerCount) {
       ec.execute(new Runnable() {
         def run() : Unit = {
@@ -183,8 +187,10 @@ object Main {
             } else {
               println("processing dir: " + dir)
               val (moduleId, request) = processAlbum(dir)
-              postMessage(request)
-              dir.listFiles().filter(validFile).map(child => processImage(moduleId, child)).foreach(postMessage)
+              postMessage(apiServer, request)
+              dir.listFiles().filter(validFile).map(child => processImage(moduleId, child)).foreach { mesg =>
+                postMessage(apiServer, mesg)
+              }
             }
           }
         }
@@ -192,7 +198,7 @@ object Main {
     }
 
     ec.threadPool.shutdown()
-    ec.threadPool.awaitTermination(Long.MaxValue, TimeUnit.NANOSECONDS)
+    ec.threadPool.awaitTermination(Long.MaxValue, TimeUnit.DAYS)
 
     val endTime = System.currentTimeMillis() / 1000
 
