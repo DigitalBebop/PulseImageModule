@@ -73,8 +73,7 @@ object Main {
     }
   }
 
-  def getAlbums(dir: File, queue: BlockingQueue[File]): Unit =
-    listFiles(dir).map(_.getParentFile).toSet.foreach(queue.add)
+  def getAlbums(dir: File): Set[File] = listFiles(dir).map(_.getParentFile).toSet
 
   def processAlbum(dir: File): (String, IndexRequest) = {
     val albums = "albums"
@@ -164,41 +163,25 @@ object Main {
     else
       "http://localhost:8080"
 
-    val queue = new LinkedBlockingQueue[File]()
-    val POISON_PILL = null
+    val dirs = getAlbums(new File(dir))
 
-    val f =  new FutureTask[Unit](new Callable[Unit]() {
-      def call(): Unit = {
-        getAlbums(new File(dir), queue)
-        queue.put(POISON_PILL)
-      }
-    })
-    ec.execute(f)
-
-    val workerCount = 2
-    for (i <- 1 to workerCount) {
-      ec.execute(new Runnable() {
-        def run() : Unit = {
-          while (true) {
-            val dir = queue.take()
-            if (dir == POISON_PILL) {
-              queue.put(POISON_PILL)
-              return
-            } else {
-              println("processing dir: " + dir)
-              val (moduleId, request) = processAlbum(dir)
-              postMessage(apiServer, request)
-              dir.listFiles().filter(validFile).map(child => processImage(moduleId, child)).foreach { mesg =>
-                postMessage(apiServer, mesg)
-              }
-            }
+    val cores = Runtime.getRuntime.availableProcessors
+    val pool = Executors.newFixedThreadPool(cores * 2)
+    dirs.foreach { album =>
+      pool.submit(new Runnable() {
+        def run(): Unit = {
+          println("processing dir: " + dir)
+          val (moduleId, request) = processAlbum(album)
+          postMessage(apiServer, request)
+          album.listFiles().filter(validFile).map(child => processImage(moduleId, child)).foreach { mesg =>
+            postMessage(apiServer, mesg)
           }
         }
       })
     }
 
-    ec.threadPool.shutdown()
-    ec.threadPool.awaitTermination(Long.MaxValue, TimeUnit.DAYS)
+    pool.shutdown()
+    pool.awaitTermination(Long.MaxValue, TimeUnit.DAYS)
 
     val endTime = System.currentTimeMillis() / 1000
 
