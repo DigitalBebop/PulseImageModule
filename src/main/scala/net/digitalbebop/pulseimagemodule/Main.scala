@@ -73,7 +73,7 @@ object Main {
     }
   }
 
-  def getAlbums(dir: File): Set[File] = listFiles(dir).map(_.getParentFile).toSet
+  def getAlbums(dir: File): Set[File] = FileUtils.listFiles(dir, null, true).map(_.getParentFile).toSet
 
   def processAlbum(dir: File): (String, IndexRequest) = {
     val albums = "albums"
