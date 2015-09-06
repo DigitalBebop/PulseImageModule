@@ -22,22 +22,12 @@ import scala.concurrent.ExecutionContext
 import scala.util.parsing.json.JSONObject
 
 object Main {
-
   val startTime = System.currentTimeMillis() / 1000
-  //final val apiServer = "http://localhost:8080"
-  val galleryUrl = "https://gallery.csh.rit.edu/v/"
-  final val imageModule = "images"
-  final val extensions = Array("png", "jpg", "jpeg", "gif", "bmp", "svg")
+  final val GALLERY_URL = "https://gallery.csh.rit.edu/v/"
+  final val MODULE_NAME = "images"
+  final val EXTENSIONS = Array("png", "jpg", "jpeg", "gif", "bmp", "svg")
   val filesProcessed  = new AtomicLong(0)
-
-  implicit val ec = new ExecutionContext {
-    val threadPool = Executors.newFixedThreadPool(20)
-
-    def execute(runnable: Runnable): Unit = threadPool.submit(runnable)
-
-    def reportFailure(t: Throwable) {}
-  }
-
+  
   lazy val getSocketFactory: SSLSocketFactory = {
     val tm: Array[TrustManager] = Array(new NaiveTrustManager())
     val context = SSLContext.getInstance("SSL")
@@ -56,7 +46,7 @@ object Main {
     val name = file.getName
     val index = name.lastIndexOf(".")
     if (index != -1) {
-      extensions.contains(name.substring(index + 1).toLowerCase)
+      EXTENSIONS.contains(name.substring(index + 1).toLowerCase)
     } else {
       false
     }
@@ -66,7 +56,7 @@ object Main {
     dir.listFiles().flatMap(listFiles)
   } else {
     val index = dir.getName.lastIndexOf(".")
-    if (index != -1 && extensions.contains(dir.getName.substring(index + 1).toLowerCase)) {
+    if (index != -1 && EXTENSIONS.contains(dir.getName.substring(index + 1).toLowerCase)) {
       Array(dir)
     } else {
       Array.empty
@@ -83,8 +73,8 @@ object Main {
     }
     val indexData = strBuilder.toString()
     val path = dir.getAbsolutePath
-    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replaceAll("[ |+]", "_")
-    val location = galleryUrl + moduleId
+    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replaceAll(" ", "+")
+    val location = GALLERY_URL + moduleId
     val title = cleanString(dir.getName) + " - " + cleanString(dir.getParentFile.getName)
     val meta = Map[String, String](
       "format" -> "album",
@@ -98,7 +88,7 @@ object Main {
     indexBuilder.setLocation(location)
     indexBuilder.setMetaTags(new JSONObject(meta).toString())
     indexBuilder.setModuleId(moduleId)
-    indexBuilder.setModuleName(imageModule)
+    indexBuilder.setModuleName(MODULE_NAME)
     indexBuilder.setTimestamp(timestamp)
     indexBuilder.addTags("album")
     (moduleId, indexBuilder.build())
@@ -114,7 +104,7 @@ object Main {
     val path = file.getAbsolutePath
     val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replace(" ", "_")
     val timestamp = Files.readAttributes(file.toPath, classOf[BasicFileAttributes]).creationTime().toMillis
-    val location = galleryUrl + moduleId
+    val location = GALLERY_URL + moduleId
     val meta = Map(
       "format" -> "image",
       "title" -> cleanString(file.getName)
@@ -124,7 +114,7 @@ object Main {
     indexBuilder.setIndexData(indexData)
     indexBuilder.setRawData(ByteString.readFrom(Files.newInputStream(file.toPath)))
     indexBuilder.setLocation(location)
-    indexBuilder.setModuleName(imageModule)
+    indexBuilder.setModuleName(MODULE_NAME)
     indexBuilder.setMetaTags(new JSONObject(meta).toString())
     indexBuilder.setTimestamp(timestamp)
     indexBuilder.setModuleId(moduleId)
@@ -164,9 +154,35 @@ object Main {
       "http://localhost:8080"
 
     val dirs = getAlbums(new File(dir))
+    val queue = new ConcurrentLinkedQueue[File]()
+    dirs.foreach(queue.add)
 
     val cores = Runtime.getRuntime.availableProcessors
-    val pool = Executors.newFixedThreadPool(cores * 2)
+    val threads = cores * 2
+    val pool = Executors.newFixedThreadPool(threads)
+    val lock =  new CountDownLatch(threads)
+
+    (1 to threads).foreach { _ =>
+      pool.submit(new Runnable() {
+        def run(): Unit = {
+          while(true) {
+            val file = queue.poll()
+            if (file == null) {
+              lock.countDown()
+              return
+            } else {
+              val (moduleId, request) = processAlbum(file)
+              postMessage(apiServer, request)
+              file.listFiles().filter(validFile).map(child => processImage(moduleId, child)).foreach { mesg =>
+                postMessage(apiServer, mesg)
+              }
+            }
+          }
+        }
+      })
+    }
+
+    /*
     dirs.foreach { album =>
       pool.submit(new Runnable() {
         def run(): Unit = {
@@ -179,7 +195,9 @@ object Main {
         }
       })
     }
+    */
 
+    lock.await()
     pool.shutdown()
     pool.awaitTermination(Long.MaxValue, TimeUnit.DAYS)
 
