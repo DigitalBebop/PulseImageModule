@@ -5,6 +5,7 @@ import java.io.File
 import java.nio.file._
 import java.nio.file.attribute.BasicFileAttributes
 import java.security.SecureRandom
+import java.util.UUID
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl._
@@ -73,7 +74,7 @@ object Main {
     }
     val indexData = strBuilder.toString()
     val path = dir.getAbsolutePath
-    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replaceAll(" ", "+")
+    val moduleId = UUID.randomUUID().toString
     val location = GALLERY_URL + moduleId
     val title = cleanString(dir.getName) + " - " + cleanString(dir.getParentFile.getName)
     val meta = Map[String, String](
@@ -165,7 +166,7 @@ object Main {
     (1 to threads).foreach { _ =>
       pool.submit(new Runnable() {
         def run(): Unit = {
-          while(true) {
+          while (true) {
             val file = queue.poll()
             if (file == null) {
               lock.countDown()
@@ -173,29 +174,15 @@ object Main {
             } else {
               val (moduleId, request) = processAlbum(file)
               postMessage(apiServer, request)
-              file.listFiles().filter(validFile).map(child => processImage(moduleId, child)).foreach { mesg =>
-                postMessage(apiServer, mesg)
-              }
+              file.listFiles()
+                .filter(validFile)
+                .map(child => processImage(moduleId, child))
+                .foreach(mesg => postMessage(apiServer, mesg))
             }
           }
         }
       })
     }
-
-    /*
-    dirs.foreach { album =>
-      pool.submit(new Runnable() {
-        def run(): Unit = {
-          println("processing dir: " + dir)
-          val (moduleId, request) = processAlbum(album)
-          postMessage(apiServer, request)
-          album.listFiles().filter(validFile).map(child => processImage(moduleId, child)).foreach { mesg =>
-            postMessage(apiServer, mesg)
-          }
-        }
-      })
-    }
-    */
 
     lock.await()
     pool.shutdown()
