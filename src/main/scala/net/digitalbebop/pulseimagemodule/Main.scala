@@ -103,7 +103,7 @@ object Main {
     val albums = "albums"
 
     val path = file.getAbsolutePath
-    val moduleId = path.substring(path.indexOf(albums) + albums.length + 1).replace(" ", "_")
+    val moduleId = UUID.randomUUID().toString
     val timestamp = Files.readAttributes(file.toPath, classOf[BasicFileAttributes]).creationTime().toMillis
     val location = GALLERY_URL + moduleId
     val meta = Map(
