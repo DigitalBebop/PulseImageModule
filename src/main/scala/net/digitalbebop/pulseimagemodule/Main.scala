@@ -74,7 +74,7 @@ object Main {
     }
     val indexData = strBuilder.toString()
     val path = dir.getAbsolutePath
-    val moduleId = UUID.randomUUID().toString
+    val moduleId = UUID.nameUUIDFromBytes(dir.getAbsolutePath.getBytes).toString
     val location = GALLERY_URL + path.substring(path.indexOf(albums) + albums.length + 1).replaceAll(" ", "+")
     val title = cleanString(dir.getName) + " - " + cleanString(dir.getParentFile.getName)
     val meta = Map[String, String](
@@ -103,7 +103,7 @@ object Main {
     val albums = "albums"
 
     val path = file.getAbsolutePath
-    val moduleId = UUID.randomUUID().toString
+    val moduleId = UUID.nameUUIDFromBytes(file.getAbsolutePath.getBytes).toString
     val timestamp = Files.readAttributes(file.toPath, classOf[BasicFileAttributes]).creationTime().toMillis
     val location = GALLERY_URL + path.substring(path.indexOf(albums) + albums.length + 1).replace(" ", "_")
     val meta = Map(
