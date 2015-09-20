@@ -14,12 +14,13 @@ import com.google.protobuf.ByteString
 import net.digitalbebop.ClientRequests.IndexRequest
 import org.apache.commons.cli.{DefaultParser, Options}
 import org.apache.commons.io.FileUtils
+import org.apache.http.client.config.RequestConfig
 import org.apache.http.client.methods.HttpPost
 import org.apache.http.entity.ByteArrayEntity
-import org.apache.http.impl.client.HttpClients
+import org.apache.http.impl.client.{HttpClientBuilder, DefaultHttpClient, HttpClients}
+import org.apache.http.params.HttpConnectionParams
 
 import scala.collection.JavaConversions._
-import scala.concurrent.ExecutionContext
 import scala.util.parsing.json.JSONObject
 
 object Main {
@@ -124,10 +125,17 @@ object Main {
     indexBuilder.build()
   }
 
+  def httpClient() = HttpClientBuilder.create().setDefaultRequestConfig(
+    RequestConfig.custom()
+      .setConnectTimeout(5000)
+      .setConnectionRequestTimeout(5000)
+      .setSocketTimeout(5000).build()).build()
+
   def postMessage(apiServer: String, message: IndexRequest): Unit = {
     val post = new HttpPost(s"$apiServer/api/index")
     post.setEntity(new ByteArrayEntity(message.toByteArray))
-    HttpClients.createDefault().execute(post).close()
+    httpClient().execute(post).close()
+    //HttpClients.createDefault().execute(post).close()
     val amount = filesProcessed.incrementAndGet()
     if (amount % 100 == 0) {
       val timeDiff = System.currentTimeMillis() / 1000 - startTime
