@@ -125,11 +125,14 @@ object Main {
     indexBuilder.build()
   }
 
-  def httpClient() = HttpClientBuilder.create().setDefaultRequestConfig(
+  def httpClient() = { 
+    val timeout = 60000
+    HttpClientBuilder.create().setDefaultRequestConfig(
     RequestConfig.custom()
-      .setConnectTimeout(5000)
-      .setConnectionRequestTimeout(5000)
-      .setSocketTimeout(5000).build()).build()
+      .setConnectTimeout(timeout)
+      .setConnectionRequestTimeout(timeout)
+      .setSocketTimeout(timeout).build()).build()
+  }
 
   def postMessage(apiServer: String, message: IndexRequest): Unit = {
     val post = new HttpPost(s"$apiServer/api/index")
